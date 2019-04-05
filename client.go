@@ -599,7 +599,10 @@ func (c *client) Publish(topic string, qos byte, retained bool, payload interfac
 		DEBUG.Println(CLI, "storing publish message (reconnecting), topic:", topic)
 	} else {
 		DEBUG.Println(CLI, "sending publish message, topic:", topic)
-		c.obound <- &PacketAndToken{p: pub, t: token}
+		select {
+		case c.obound <- &PacketAndToken{p: pub, t: token}:
+		case <-c.stop:
+		}
 	}
 	return token
 }
@@ -701,7 +704,10 @@ func (c *client) resume(subscription bool) {
 				c.claimID(token, details.MessageID)
 				DEBUG.Println(STR, fmt.Sprintf("loaded pending publish (%d)", details.MessageID))
 				DEBUG.Println(STR, details)
-				c.obound <- &PacketAndToken{p: packet, t: token}
+				select {
+				case c.obound <- &PacketAndToken{p: packet, t: token}:
+				case <-c.stop:
+				}
 			default:
 				ERROR.Println(STR, "invalid message type in store (discarded)")
 				c.persist.Del(key)
