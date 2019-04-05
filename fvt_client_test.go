@@ -18,10 +18,13 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"testing"
 	"time"
+
+	"github.com/eclipse/paho.mqtt.golang/packets"
 )
 
 func Test_Start(t *testing.T) {
@@ -138,6 +141,64 @@ func Test_Publish_3(t *testing.T) {
 	c.Publish("/test/Publish", 0, false, "Publish1 qos0")
 	c.Publish("/test/Publish", 1, false, "Publish2 qos1")
 	c.Publish("/test/Publish", 2, false, "Publish2 qos2")
+
+	c.Disconnect(250)
+}
+
+type connLostTestStore struct {
+	c Client
+}
+
+func (s *connLostTestStore) Put(key string, message packets.ControlPacket) {
+	if s.c == nil {
+		panic(errors.New("no MQTT client set"))
+	}
+
+	c, ok := s.c.(*client)
+	if !ok {
+		panic(fmt.Errorf("expected *client but got %T", s.c))
+	}
+
+	DEBUG.Println(CLI, "connLostTestStore.Put - s.c.(*client).internalConnLost")
+	c.internalConnLost(errors.New("connLostTestStore - connection lost"))
+}
+
+func (s *connLostTestStore) Open()                                {}
+func (s *connLostTestStore) Get(key string) packets.ControlPacket { return nil }
+func (s *connLostTestStore) All() []string                        { return nil }
+func (s *connLostTestStore) Del(key string)                       {}
+func (s *connLostTestStore) Close()                               {}
+func (s *connLostTestStore) Reset()                               {}
+
+func Test_Publish_Disconnected(t *testing.T) {
+	s := new(connLostTestStore)
+
+	ops := NewClientOptions()
+	ops.AddBroker(FVTTCP)
+	ops.SetClientID("Publish_Disconnected")
+	ops.SetStore(s)
+	ops.SetAutoReconnect(false)
+
+	c := NewClient(ops)
+	s.c = c
+
+	token := c.Connect()
+	if token.Wait() && token.Error() != nil {
+		t.Fatalf("Error on Client.Connect(): %v", token.Error())
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		c.Publish("/test/Publish", 1, false, "Publish - connLost")
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("publishing hangs for a second")
+	}
 
 	c.Disconnect(250)
 }
