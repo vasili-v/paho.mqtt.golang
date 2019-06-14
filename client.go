@@ -471,10 +471,12 @@ func (c *client) Disconnect(quiesce uint) {
 
 		dm := packets.NewControlPacket(packets.Disconnect).(*packets.DisconnectPacket)
 		dt := newToken(packets.Disconnect)
-		c.oboundP <- &PacketAndToken{p: dm, t: dt}
-
-		// wait for work to finish, or quiesce time consumed
-		dt.WaitTimeout(time.Duration(quiesce) * time.Millisecond)
+		select {
+		case c.oboundP <- &PacketAndToken{p: dm, t: dt}:
+			// wait for work to finish, or quiesce time consumed
+			dt.WaitTimeout(time.Duration(quiesce) * time.Millisecond)
+		case <-c.stop:
+		}
 	} else {
 		WARN.Println(CLI, "Disconnect() called but not connected (disconnected/reconnecting)")
 		c.setConnected(disconnected)
@@ -634,7 +636,12 @@ func (c *client) Subscribe(topic string, qos byte, callback MessageHandler) Toke
 	}
 
 	token.subs = append(token.subs, topic)
-	c.oboundP <- &PacketAndToken{p: sub, t: token}
+
+	select {
+	case c.oboundP <- &PacketAndToken{p: sub, t: token}:
+	case <-c.stop:
+	}
+
 	DEBUG.Println(CLI, "exit Subscribe")
 	return token
 }
@@ -662,7 +669,12 @@ func (c *client) SubscribeMultiple(filters map[string]byte, callback MessageHand
 	}
 	token.subs = make([]string, len(sub.Topics))
 	copy(token.subs, sub.Topics)
-	c.oboundP <- &PacketAndToken{p: sub, t: token}
+
+	select {
+	case c.oboundP <- &PacketAndToken{p: sub, t: token}:
+	case <-c.stop:
+	}
+
 	DEBUG.Println(CLI, "exit SubscribeMultiple")
 	return token
 }
@@ -684,13 +696,19 @@ func (c *client) resume(subscription bool) {
 				if subscription {
 					DEBUG.Println(STR, fmt.Sprintf("loaded pending subscribe (%d)", details.MessageID))
 					token := newToken(packets.Subscribe).(*SubscribeToken)
-					c.oboundP <- &PacketAndToken{p: packet, t: token}
+					select {
+					case c.oboundP <- &PacketAndToken{p: packet, t: token}:
+					case <-c.stop:
+					}
 				}
 			case *packets.UnsubscribePacket:
 				if subscription {
 					DEBUG.Println(STR, fmt.Sprintf("loaded pending unsubscribe (%d)", details.MessageID))
 					token := newToken(packets.Unsubscribe).(*UnsubscribeToken)
-					c.oboundP <- &PacketAndToken{p: packet, t: token}
+					select {
+					case c.oboundP <- &PacketAndToken{p: packet, t: token}:
+					case <-c.stop:
+					}
 				}
 			case *packets.PubrelPacket:
 				DEBUG.Println(STR, fmt.Sprintf("loaded pending pubrel (%d)", details.MessageID))
@@ -742,7 +760,11 @@ func (c *client) Unsubscribe(topics ...string) Token {
 	unsub.Topics = make([]string, len(topics))
 	copy(unsub.Topics, topics)
 
-	c.oboundP <- &PacketAndToken{p: unsub, t: token}
+	select {
+	case c.oboundP <- &PacketAndToken{p: unsub, t: token}:
+	case <-c.stop:
+	}
+
 	for _, topic := range topics {
 		c.msgRouter.deleteRoute(topic)
 	}
