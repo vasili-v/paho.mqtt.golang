@@ -126,10 +126,12 @@ func incoming(c *client) {
 
 	defer c.workers.Done()
 
+	conn := c.conn
+
 	DEBUG.Println(NET, "incoming started")
 
 	for {
-		if cp, err = packets.ReadPacket(c.conn); err != nil {
+		if cp, err = packets.ReadPacket(conn); err != nil {
 			break
 		}
 		DEBUG.Println(NET, "Received Message")
@@ -164,6 +166,9 @@ func incoming(c *client) {
 // actually send outgoing message to the wire
 func outgoing(c *client) {
 	defer c.workers.Done()
+
+	conn := c.conn
+
 	DEBUG.Println(NET, "outgoing started")
 
 	for {
@@ -176,10 +181,10 @@ func outgoing(c *client) {
 			msg := pub.p.(*packets.PublishPacket)
 
 			if c.options.WriteTimeout > 0 {
-				c.conn.SetWriteDeadline(time.Now().Add(c.options.WriteTimeout))
+				conn.SetWriteDeadline(time.Now().Add(c.options.WriteTimeout))
 			}
 
-			if err := msg.Write(c.conn); err != nil {
+			if err := msg.Write(conn); err != nil {
 				ERROR.Println(NET, "outgoing stopped with error", err)
 				pub.t.setError(err)
 				signalError(c.errors, err)
@@ -189,7 +194,7 @@ func outgoing(c *client) {
 			if c.options.WriteTimeout > 0 {
 				// If we successfully wrote, we don't want the timeout to happen during an idle period
 				// so we reset it to infinite.
-				c.conn.SetWriteDeadline(time.Time{})
+				conn.SetWriteDeadline(time.Time{})
 			}
 
 			if msg.Qos == 0 {
@@ -204,7 +209,7 @@ func outgoing(c *client) {
 				msg.p.(*packets.UnsubscribePacket).MessageID = c.getID(msg.t)
 			}
 			DEBUG.Println(NET, "obound priority msg to write, type", reflect.TypeOf(msg.p))
-			if err := msg.p.Write(c.conn); err != nil {
+			if err := msg.p.Write(conn); err != nil {
 				ERROR.Println(NET, "outgoing stopped with error", err)
 				if msg.t != nil {
 					msg.t.setError(err)
